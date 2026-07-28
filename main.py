@@ -35,6 +35,6 @@ def web_app_data_handler(message):
     except Exception as e:
         bot.send_message(message.chat.id, "Ошибка при обработке заказа.")
 
-if name == 'main':
+if __name__ == '__main__':
     print("Бот успешно запущен!")
     bot.polling(none_stop=True)
