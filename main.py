@@ -1,40 +1,39 @@
 import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 import telebot
-from telebot import types
-import json
 
-# Для теста вставьте ваш токен в кавычках вместо всей строки os.environ.get
-TOKEN = os.environ.get('BOT_TOKEN', 'СЮДА_МОЖНО_ВСТАВИТЬ_ТОКЕН_ДЛЯ_ТЕСТА') 
-bot = telebot.TeleBot(TOKEN)
+# 1. Берем токен из настроек Render
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# Ваша рабочая ссылка на магазин
-WEB_APP_URL = "https://qn800101postp-oss.github.io/Taivs/" 
+# 2. Простейший веб-сервер, чтобы Render не ругался на порты
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
 
+def run_web_server():
+    # Render автоматически передает номер порта в переменную PORT
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"Web server started on port {port}")
+    server.serve_forever()
+
+# 3. Логика вашего бота
 @bot.message_handler(commands=['start'])
-def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    web_app = types.WebAppInfo(WEB_APP_URL)
-    btn = types.KeyboardButton(text="🛍️ Открыть магазин", web_app=web_app)
-    markup.add(btn)
-    
-    bot.send_message(
-        message.chat.id, 
-        "Привет! Добро пожаловать в Victoria's Secret.\n\nНажми на кнопку ниже, чтобы открыть каталог товаров:", 
-        reply_markup=markup
-    )
+def start_message(message):
+    bot.reply_to(message, "Привет! Магазин Victoria's Secret готов к работе!")
 
-@bot.message_handler(content_types=['web_app_data'])
-def web_app_data_handler(message):
-    try:
-        data = json.loads(message.web_app_data.data)
-        order_text = "🛍️ Новый заказ в магазине!\n\n"
-        for item in data['items']:
-            order_text += f"• {item['name']} — {item['price']} ₴\n"
-        order_text += f"\n💰 Итого к оплате: {data['total']} ₴"
-        bot.send_message(message.chat.id, order_text, parse_mode="Markdown")
-    except Exception as e:
-        bot.send_message(message.chat.id, "Ошибка при обработке заказа.")
-
+# 4. Запуск всего приложения
 if __name__ == '__main__':
-    print("Бот успешно запущен!")
-    bot.polling(none_stop=True)
+    # Запускаем веб-сервер в отдельном потоке, чтобы он не мешал боту
+    web_thread = threading.Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
+
+    # Запускаем самого бота
+    print("Bot is polling...")
+    bot.infinity_polling()
