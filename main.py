@@ -3,36 +3,38 @@ import os
 import csv
 from telebot import types
 
+# Инициализируем бота по токену из Render
 bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
-
-CSV_FILE = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
 
 def get_products():
     products = []
-    if not os.path.exists(CSV_FILE):
+    # Жестко прописываем имя твоего файла внутри функции, чтобы оно точно не потерялось
+    file_path = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
+    
+    if not os.path.exists(file_path):
+        print("Файл базы данных товаров не найден в корне проекта!")
         return products
         
     try:
-        with open(CSV_FILE, mode="r", encoding="utf-8-sig", errors="ignore") as file:
-            # Читаем через DictReader, жестко указав разделитель-запятую
+        # utf-8-sig срезает скрытые Excel BOM-символы, errors='ignore' защищает от сбоев
+        with open(file_path, mode="r", encoding="utf-8-sig", errors="ignore") as file:
             reader = csv.DictReader(file, delimiter=",")
             
             for row in reader:
-                # Берем точные названия ключей из твоего файла
-                name = row.get("Назва") or row.get("Назва (укр)")
-                price = row.get("Ціна продажу") or row.get("Рекомендована ціна")
+                name = row.get("Назва")
+                price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or "0"
                 color = row.get("Колір") or "-"
                 size = row.get("Розмір") or "-"
                 photo = row.get("Фото") or ""
                 
-                # Безопасно проверяем количество доступного товара
+                # Безопасная проверка доступности товара
                 try:
                     available = int(row.get("Доступно до продажу всього", 0))
-                except (ValueError, TypeError):
+                except:
                     available = 0
                 
-                # Пропускаем пустые строки или товары, которых нет в наличии
-                if not name or str(name).isspace() or available <= 0:
+                # Берем только заполненные товары в наличии
+                if not name or available <= 0:
                     continue
 
                 products.append({
@@ -43,10 +45,9 @@ def get_products():
                     "photo": str(photo).strip()
                 })
     except Exception as e:
-        print(f"Ошибка при чтении CSV: {e}")
+        print(f"Ошибка чтения CSV: {e}")
         
     return products
-
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -71,12 +72,12 @@ def handle_buttons(message):
             products = get_products()
             
             if not products:
-                bot.send_message(message.chat.id, "Каталог товаров временно пуст или файл не найден ботом.")
+                bot.send_message(message.chat.id, "Каталог товаров временно пуст или обновляется.")
                 return
                 
-            bot.send_message(message.chat.id, f"Найдено товаров: {len(products)}. Загружаю первые позиции...")
+            bot.send_message(message.chat.id, f"Найдено товаров в наличии: {len(products)}. Загружаю первые позиции...")
             
-            # Выводим первые 10 товаров
+            # Показываем первые 10 товаров
             for prod in products[:10]:
                 caption = (
                     f"🌸 *{prod['name']}*\n\n"
@@ -85,11 +86,11 @@ def handle_buttons(message):
                     f"💰 *Цена:* {prod['price']} грн"
                 )
                 
-                # Проверяем ссылку на фото
+                # Проверяем ссылку на картинку
                 if prod['photo'] and prod['photo'].startswith("http"):
                     try:
                         bot.send_photo(message.chat.id, prod['photo'], caption=caption, parse_mode="Markdown")
-                    except Exception:
+                    except:
                         bot.send_message(message.chat.id, caption, parse_mode="Markdown")
                 else:
                     bot.send_message(message.chat.id, caption, parse_mode="Markdown")
@@ -97,6 +98,14 @@ def handle_buttons(message):
         elif message.text == "🛒 Корзина":
             bot.send_message(message.chat.id, "Ваша корзина пока пуста.")
             
+        elif message.text == "ℹ️ Помощь":
+            bot.send_message(message.chat.id, "По всем вопросам пишите менеджеру.")
+            
+    except Exception as e:
+        print(f"Ошибка при клике на кнопку: {e}")
+
+if __name__ == '__main__':
+    bot.polling(none_stop=True)
         elif message.text == "ℹ️ Помощь":
             bot.send_message(message.chat.id, "По всем вопросам пишите менеджеру.")
             
