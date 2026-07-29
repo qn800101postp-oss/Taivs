@@ -1,9 +1,9 @@
 import telebot
 import os
-import csv
 from telebot import types
 from threading import Thread
 from flask import Flask
+import openpyxl
 
 app = Flask('')
 
@@ -17,77 +17,97 @@ def run_web():
 
 bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
 
-# Указываем твой оригинальный файл, который ты загружал
-file_path = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
+# Имя твоего оригинального Excel файла
+file_path = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx"
 
-# Корзина: {chat_id: { "Название (Цвет, Размер)": {price: int, count: int} }}
 user_carts = {}
 
 def get_products_data():
-    """
-    Считывает оригинальный CSV файл. 
-    Группирует строго по моделям, учитывая только товары в наличии (>0).
-    """
     categories = {"Бюстгальтеры": {}, "Трусики": {}}
     
     if not os.path.exists(file_path):
+        print(f"Ошибка: Файл {file_path} не найден!")
         return categories
         
-    with open(file_path, mode="r", encoding="utf-8-sig", errors="ignore") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            # Проверяем наличие колонки имени
-            name = row.get("Назва", "") or row.get("Назва (укр)", "")
-            if not name:
-                continue
-            name = name.strip()
+    try:
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        sheet = wb.active
+    except Exception as e:
+        print(f"Ошибка при загрузке Excel: {e}")
+        return categories
+
+    # Читаем первую строчку (заголовки)
+    headers = [str(cell.value).strip().lower() if cell.value else "" for cell in next(sheet.iter_rows(max_row=1))]
+    
+    # Умный поиск индексов колонок (начиная с 0)
+    idx_name = next((i for i, h in enumerate(headers) if "назв" in h), None)
+    idx_qty = next((i for i, h in enumerate(headers) if "доступно" in h or "залиш" in h), None)
+    idx_price = next((i for i, h in enumerate(headers) if "ціна продажу" in h), None) or next((i for i, h in enumerate(headers) if "ціна" in h), None)
+    idx_color = next((i for i, h in enumerate(headers) if "колір" in h or "цвет" in h), None)
+    idx_size = next((i for i, h in enumerate(headers) if "розм" in h or "размер" in h), None)
+    idx_photo = next((i for i, h in enumerate(headers) if "фото" in h or "картинка" in h or "лінк" in h), None)
+
+    # Если базовые колонки не найдены, выходим
+    if idx_name is None:
+        return categories
+
+    # Перебираем все строки таблицы (пропуская первую с заголовками)
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        if not row:
+            continue
             
-            # Проверяем реальный остаток товара
-            try:
-                qty = int(row.get("Доступно до продажу всього", 0))
-            except:
-                qty = 0
-                
-            if qty <= 0:
-                continue # Пропускаем, если нет в наличии
-                
-            # Определяем цену
-            price = row.get("Ціна продажу", "") or row.get("Рекомендована ціна", "0")
-            price = "".join(filter(str.isdigit, str(price)))
-            price = int(price) if price else 0
+        name = str(row[idx_name]).strip() if row[idx_name] else ""
+        if not name or name == "None":
+            continue
             
-            color = (row.get("Колір", "") or "-").strip()
-            size = (row.get("Розмір", "") or "-").strip()
-            photo = (row.get("Фото", "") or "").strip()
+        # Проверяем количество
+        qty_val = row[idx_qty] if idx_qty is not None else 0
+        try:
+            qty = int(float(qty_val)) if qty_val is not None else 0
+        except:
+            qty = 0
             
-            # Фильтр по категориям
-            name_lower = name.lower()
-            if "бюстгальтер" in name_lower or "bra" in name_lower:
-                cat = "Бюстгальтеры"
-            elif any(k in name_lower for k in ["трусики", "стрінги", "шортики", "thong", "panty", "танга", "чікі"]):
-                cat = "Трусики"
-            else:
-                cat = "Трусики" # Дефолтная категория для белья, если не определилось явно
-                
-            # Группируем базовое имя модели (до скобок с артикулом)
-            model_base = name.split(" (")[0].strip()
-            
-            if model_base not in categories[cat]:
-                categories[cat][model_base] = {
-                    "name": model_base,
-                    "price": price,
-                    "photo": photo,
-                    "colors": {} # { Цвет: { "sizes": set(), "photo": str } }
-                }
-                
-            if color not in categories[cat][model_base]["colors"]:
-                categories[cat][model_base]["colors"][color] = {
-                    "sizes": set(),
-                    "photo": photo # Привязываем фото к конкретному цвету
-                }
-                
-            categories[cat][model_base]["colors"][color]["sizes"].add(size)
-            
+        if qty <= 0:
+            continue # ВЫВОДИМ ТОЛЬКО ТО, ЧТО В НАЛИЧИИ
+
+        # Проверяем цену
+        price_val = row[idx_price] if idx_price is not None else 0
+        try:
+            price_digits = "".join(filter(str.isdigit, str(price_val)))
+            price = int(price_digits) if price_digits else 0
+        except:
+            price = 0
+
+        color = str(row[idx_color]).strip() if (idx_color is not None and row[idx_color]) else "-"
+        size = str(row[idx_size]).strip() if (idx_size is not None and row[idx_size]) else "-"
+        photo = str(row[idx_photo]).strip() if (idx_photo is not None and row[idx_photo]) else ""
+
+        # Фильтр категорий
+        name_lower = name.lower()
+        if "бюстгальтер" in name_lower or "bra" in name_lower:
+            cat = "Бюстгальтеры"
+        else:
+            cat = "Трусики"
+
+        # Убираем артикул в скобках для группировки уникальной модели
+        model_base = name.split(" (")[0].strip()
+
+        if model_base not in categories[cat]:
+            categories[cat][model_base] = {
+                "name": model_base,
+                "price": price,
+                "photo": photo,
+                "colors": {}
+            }
+
+        if color not in categories[cat][model_base]["colors"]:
+            categories[cat][model_base]["colors"][color] = {
+                "sizes": set(),
+                "photo": photo
+            }
+
+        categories[cat][model_base]["colors"][color]["sizes"].add(size)
+
     return categories
 
 @bot.message_handler(commands=['start'])
@@ -95,8 +115,167 @@ def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("🛍️ Каталог"), types.KeyboardButton("🛒 Корзина"))
     markup.add(types.KeyboardButton("ℹ️ Помощь"))
-    bot.send_message(message.chat.id, "Привет! Добро пожаловать в магазин Victoria's Secret! 🌸\nВыберите интересующий раздел ниже 👇", reply_markup=markup)
+    bot.send_message(message.chat.id, "Привет! Добро пожаловать в магазин Victoria's Secret! 🌸\nВыберите интересующий раздел 👇", reply_markup=markup)
 
+@bot.message_handler(func=lambda message: message.text == "🛍️ Каталог")
+def catalog_btn(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("👙 Бюстгальтеры", callback_data="showcat_Бюстгальтеры"),
+        types.InlineKeyboardButton("🩲 Трусики", callback_data="showcat_Трусики")
+    )
+    bot.send_message(message.chat.id, "Выберите категорию:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("showcat_"))
+def show_category(call):
+    cat_name = call.data.split("_")[1]
+    data = get_products_data()
+    products = data.get(cat_name, {})
+    
+    if not products:
+        bot.send_message(call.message.chat.id, f"В категории {cat_name} сейчас нет товаров в наличии.")
+        return
+        
+    bot.send_message(call.message.chat.id, f"✨ Доступные модели в категории {cat_name}:")
+    
+    # Показываем уникальные модели (до 15 штук)
+    for idx, (m_id, prod) in enumerate(list(products.items())[:15]):
+        desc = f"🌸 *{prod['name']}*\n💰 *Цена:* {prod['price']} грн\n\nВ наличии:\n"
+        
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for color, c_data in prod["colors"].items():
+            available_sizes = ", ".join(sorted(list(c_data["sizes"])))
+            desc += f"▪️ {color} (Размеры: {available_sizes})\n"
+            
+            cb_data = f"csel_{prod['price']}_{idx}_{color[:15]}"
+            markup.add(types.InlineKeyboardButton(f"🎨 Выбрать цвет: {color}", callback_data=cb_data))
+            
+        if prod["photo"] and prod["photo"].startswith("http"):
+            try:
+                bot.send_photo(call.message.chat.id, prod["photo"], caption=desc, reply_markup=markup, parse_mode="Markdown")
+            except:
+                bot.send_message(call.message.chat.id, desc, reply_markup=markup, parse_mode="Markdown")
+        else:
+            bot.send_message(call.message.chat.id, desc, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("csel_"))
+def color_selected(call):
+    _, price, m_idx, color = call.data.split("_")
+    
+    cat_name = "Бюстгальтеры" if "Бюстгальтер" in call.message.caption else "Трусики"
+    data = get_products_data()
+    products = list(data.get(cat_name, {}).values())
+    
+    try:
+        prod = products[int(m_idx)]
+    except:
+        bot.send_message(call.message.chat.id, "Ошибка. Откройте каталог заново.")
+        return
+        
+    exact_color = None
+    for c in prod["colors"].keys():
+        if c.startswith(color):
+            exact_color = c
+            break
+            
+    if not exact_color:
+        bot.send_message(call.message.chat.id, "Цвет не найден.")
+        return
+        
+    c_data = prod["colors"][exact_color]
+    
+    # Пробуем обновить фото под выбранный цвет
+    if c_data["photo"] and c_data["photo"].startswith("http") and c_data["photo"] != prod["photo"]:
+        try:
+            bot.edit_message_media(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                media=types.InputMediaPhoto(c_data["photo"], caption=call.message.caption, parse_mode="Markdown")
+            )
+        except:
+            pass
+
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    buttons = []
+    for size in sorted(list(c_data["sizes"])):
+        cb_cart = f"cart_{price}_{exact_color[:10]}_{size}_{prod['name'][:15]}"
+        buttons.append(types.InlineKeyboardButton(f"📏 {size}", callback_data=cb_cart))
+        
+    markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data=f"showcat_{cat_name}"))
+    
+    bot.send_message(
+        call.message.chat.id, 
+        f"Вы выбрали цвет: *{exact_color}*.\nКакой размер добавить в корзину?", 
+        reply_markup=markup, 
+        parse_mode="Markdown"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cart_"))
+def add_to_cart(call):
+    _, price, color, size, name_part = call.data.split("_")
+    
+    chat_id = call.message.chat.id
+    full_item_name = f"{name_part}... ({color}, разм. {size})"
+    
+    if chat_id not in user_carts:
+        user_carts[chat_id] = {}
+        
+    if full_item_name not in user_carts[chat_id]:
+        user_carts[chat_id][full_item_name] = {"price": int(price), "count": 1}
+    else:
+        user_carts[chat_id][full_item_name]["count"] += 1
+        
+    bot.answer_callback_query(call.id, f"Добавлено в корзину!")
+    bot.send_message(chat_id, f"🛍️ Товар *{full_item_name}* добавлен в корзину!", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == "🛒 Корзина")
+def cart_btn(message):
+    chat_id = message.chat.id
+    cart = user_carts.get(chat_id, {})
+    
+    if not cart:
+        bot.send_message(chat_id, "Ваша корзина пуста.")
+        return
+        
+    cart_text = "🛒 *Ваша корзина:*\n\n"
+    total_sum = 0
+    
+    for item_name, info in cart.items():
+        item_sum = info["price"] * info["count"]
+        total_sum += item_sum
+        cart_text += f"▪️ *{item_name}*\n  {info['count']} шт. х {info['price']} грн = {item_sum} грн\n"
+        
+    cart_text += f"\n💰 *Итого к оплате:* {total_sum} грн"
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ Оформить заказ", callback_data="checkout"))
+    markup.add(types.InlineKeyboardButton("🗑️ Очистить корзину", callback_data="clear_cart"))
+    
+    bot.send_message(chat_id, cart_text, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "clear_cart")
+def clear_cart_callback(call):
+    chat_id = call.message.chat.id
+    if chat_id in user_carts:
+        user_carts[chat_id] = {}
+    bot.answer_callback_query(call.id, "Корзина очищена")
+    bot.send_message(chat_id, "🗑️ Ваша корзина очищена.")
+
+@bot.callback_query_handler(func=lambda call: call.data == "checkout")
+def checkout_callback(call):
+    chat_id = call.message.chat.id
+    bot.send_message(chat_id, "✨ Спасибо за заказ! Менеджер свяжется с вами в ближайшее время.")
+    user_carts[chat_id] = {}
+
+@bot.message_handler(func=lambda message: message.text == "ℹ️ Помощь")
+def help_btn(message):
+    bot.send_message(message.chat.id, "По всем вопросам пишите менеджеру.")
+
+if __name__ == '__main__':
+    t = Thread(target=run_web)
+    t.start()
+    bot.polling(none_stop=True)
 @bot.message_handler(func=lambda message: message.text == "🛍️ Каталог")
 def catalog_btn(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
