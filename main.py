@@ -10,29 +10,39 @@ bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
 CSV_FILE = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
 
 def get_products():
-    """Функция для чтения доступных товаров из CSV"""
+    """Улучшенная функция для чтения товаров из CSV с автоопределением разделителя"""
     products = []
     if not os.path.exists(CSV_FILE):
         return products
         
     with open(CSV_FILE, mode="r", encoding="utf-8") as file:
-        reader = csv.DictReader(file)
+        # Читаем первую строчку, чтобы понять, какой разделитель используется (, или ;)
+        sample = file.readline()
+        file.seek(0) # Возвращаемся в начало файла
+        
+        delimiter = ";" if ";" in sample else ","
+        reader = csv.DictReader(file, delimiter=delimiter)
+        
         for row in reader:
-            # Проверяем наличие товара в колонке "Доступно до продажу всього"
-            try:
-                available = int(row.get("Доступно до продажу всього", 0))
-            except (ValueError, TypeError):
-                available = 0
-                
-            if available > 0:
-                products.append({
-                    "name": row.get("Назва", "Товар Victoria's Secret"),
-                    "price": row.get("Ціна продажу", row.get("Рекомендована ціна", "0")),
-                    "color": row.get("Колір", "-"),
-                    "size": row.get("Розмір", "-"),
-                    "photo": row.get("Фото", "")
-                })
+            # Берем название товара
+            name = row.get("Назва") or row.get("Наименование") or "Товар Victoria's Secret"
+            price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or row.get("Цена") or "0"
+            color = row.get("Колір") or row.get("Цвет") or "-"
+            size = row.get("Розмір") or row.get("Размер") or "-"
+            photo = row.get("Фото") or ""
+            
+            # Очищаем цену от лишних пробелов или знаков
+            price = str(price).strip()
+
+            products.append({
+                "name": name,
+                "price": price,
+                "color": color,
+                "size": size,
+                "photo": photo
+            })
     return products
+
 
 @bot.message_handler(commands=['start'])
 def start(message):
