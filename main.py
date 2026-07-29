@@ -2,24 +2,35 @@ import telebot
 import os
 import csv
 from telebot import types
+from threading import Thread
+from http.server import Flask, RequestHandlerServer
 
-# Инициализируем бота по токену из Render
+# 1. Создаем микро-веб-сервер для обмана Render
+from flask import Flask
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Бот Victoria's Secret работает!"
+
+def run_web():
+    # Render автоматически передает порт в переменную окружения PORT
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# 2. Настройка самого Telegram-бота
 bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
 
 def get_products():
     products = []
-    # Жестко прописываем имя твоего файла внутри функции, чтобы оно точно не потерялось
     file_path = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
     
     if not os.path.exists(file_path):
-        print("Файл базы данных товаров не найден в корне проекта!")
         return products
         
     try:
-        # utf-8-sig срезает скрытые Excel BOM-символы, errors='ignore' защищает от сбоев
         with open(file_path, mode="r", encoding="utf-8-sig", errors="ignore") as file:
             reader = csv.DictReader(file, delimiter=",")
-            
             for row in reader:
                 name = row.get("Назва")
                 price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or "0"
@@ -27,13 +38,11 @@ def get_products():
                 size = row.get("Розмір") or "-"
                 photo = row.get("Фото") or ""
                 
-                # Безопасная проверка доступности товара
                 try:
                     available = int(row.get("Доступно до продажу всього", 0))
                 except:
                     available = 0
                 
-                # Берем только заполненные товары в наличии
                 if not name or available <= 0:
                     continue
 
@@ -45,7 +54,7 @@ def get_products():
                     "photo": str(photo).strip()
                 })
     except Exception as e:
-        print(f"Ошибка чтения CSV: {e}")
+        print(f"Ошибка чтения файла: {e}")
         
     return products
 
@@ -72,12 +81,11 @@ def handle_buttons(message):
             products = get_products()
             
             if not products:
-                bot.send_message(message.chat.id, "Каталог товаров временно пуст или обновляется.")
+                bot.send_message(message.chat.id, "Каталог товаров временно пуст.")
                 return
                 
-            bot.send_message(message.chat.id, f"Найдено товаров в наличии: {len(products)}. Загружаю первые позиции...")
+            bot.send_message(message.chat.id, f"Найдено товаров: {len(products)}. Загружаю первые позиции...")
             
-            # Показываем первые 10 товаров
             for prod in products[:10]:
                 caption = (
                     f"🌸 *{prod['name']}*\n\n"
@@ -86,7 +94,6 @@ def handle_buttons(message):
                     f"💰 *Цена:* {prod['price']} грн"
                 )
                 
-                # Проверяем ссылку на картинку
                 if prod['photo'] and prod['photo'].startswith("http"):
                     try:
                         bot.send_photo(message.chat.id, prod['photo'], caption=caption, parse_mode="Markdown")
@@ -97,6 +104,19 @@ def handle_buttons(message):
                     
         elif message.text == "🛒 Корзина":
             bot.send_message(message.chat.id, "Ваша корзина пока пуста.")
+        elif message.text == "ℹ️ Помощь":
+            bot.send_message(message.chat.id, "По всем вопросам пишите менеджеру.")
+    except Exception as e:
+        print(f"Ошибка кнопок: {e}")
+
+# 3. Запуск всего вместе
+if __name__ == '__main__':
+    # Сначала запускаем веб-сервер в отдельном потоке для Render
+    t = Thread(target=run_web)
+    t.start()
+    
+    # Затем запускаем опрос Telegram-бота
+    bot.polling(none_stop=True)
             
         elif message.text == "ℹ️ Помощь":
             bot.send_message(message.chat.id, "По всем вопросам пишите менеджеру.")
