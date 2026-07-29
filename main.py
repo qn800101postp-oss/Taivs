@@ -5,7 +5,6 @@ from telebot import types
 from threading import Thread
 from flask import Flask
 
-# 1. Микро-сервер для Render
 app = Flask('')
 
 @app.route('/')
@@ -16,7 +15,6 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# 2. Настройка бота
 bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
 file_path = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
 
@@ -29,14 +27,20 @@ def get_products():
     reader = csv.DictReader(file, delimiter=",")
     
     for row in reader:
-        name = row.get("Назва")
-        price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or "0"
-        color = row.get("Колір") or "-"
-        size = row.get("Розмір") or "-"
+        # Ищем колонку имени товара во всех возможных вариантах
+        name = row.get("Назва") or row.get("Назва (укр)") or row.get("Наименование")
+        price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or row.get("Цена") or "0"
+        color = row.get("Колір") or row.get("Цвет") or "-"
+        size = row.get("Розмір") or row.get("Размер") or "-"
         photo = row.get("Фото") or ""
         
+        # Если имя не нашлось по заголовку, пробуем взять просто первую ячейку строки
         if not name:
-            continue
+            values = list(row.values())
+            if values and values[0]:
+                name = values[0]
+            else:
+                continue
 
         products.append({
             "name": str(name).strip(),
@@ -59,10 +63,11 @@ def start(message):
 def catalog_btn(message):
     products = get_products()
     if not products:
-        bot.send_message(message.chat.id, "Каталог пуст.")
+        bot.send_message(message.chat.id, "Товары не найдены в файле. Проверьте структуру CSV.")
         return
         
-    bot.send_message(message.chat.id, f"Найдено товаров: {len(products)}. Загружаю...")
+    bot.send_message(message.chat.id, f"Найдено товаров в базе: {len(products)}. Загружаю каталог...")
+    
     for prod in products[:10]:
         caption = f"🌸 *{prod['name']}*\n\n🎨 *Цвет:* {prod['color']}\n📏 *Размер:* {prod['size']}\n💰 *Цена:* {prod['price']} грн"
         if prod['photo'] and prod['photo'].startswith("http"):
