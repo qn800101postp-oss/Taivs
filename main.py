@@ -23,9 +23,27 @@ def run_web_server():
     server.serve_forever()
 
 # 3. Логика вашего бота
+from telebot import types
+
 @bot.message_handler(commands=['start'])
-def start_message(message):
-    bot.reply_to(message, "Привет! Магазин Victoria's Secret готов к работе!")
+def start(message):
+    # Создаем клавиатуру
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn_catalog = types.KeyboardButton("🛍️ Каталог")
+    btn_cart = types.KeyboardButton("🛒 Корзина")
+    btn_help = types.KeyboardButton("ℹ️ Помощь")
+    
+    # Добавляем кнопки в клавиатуру
+    markup.add(btn_catalog, btn_cart)
+    markup.add(btn_help)
+    
+    # Отправляем сообщение вместе с кнопками
+    bot.send_message(
+        message.chat.id, 
+        "Привет! Магазин Victoria's Secret готов к работе! Выберите нужное действие в меню ниже 👇", 
+        reply_markup=markup
+    )
+
 
 # 4. Запуск всего приложения
 if __name__ == '__main__':
