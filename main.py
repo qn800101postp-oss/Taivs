@@ -10,38 +10,48 @@ bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
 CSV_FILE = "hub_new_price_2026-07-26T19_01_28_TAIVS.xlsx - Sheet 1.csv"
 
 def get_products():
-    """Улучшенная функция для чтения товаров из CSV с автоопределением разделителя"""
+    """Бронебойная функция чтения CSV с защитой от падений и поддержкой разных кодировок"""
     products = []
     if not os.path.exists(CSV_FILE):
         return products
         
-    with open(CSV_FILE, mode="r", encoding="utf-8") as file:
-        # Читаем первую строчку, чтобы понять, какой разделитель используется (, или ;)
-        sample = file.readline()
-        file.seek(0) # Возвращаемся в начало файла
-        
-        delimiter = ";" if ";" in sample else ","
-        reader = csv.DictReader(file, delimiter=delimiter)
-        
-        for row in reader:
-            # Берем название товара
-            name = row.get("Назва") or row.get("Наименование") or "Товар Victoria's Secret"
-            price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or row.get("Цена") or "0"
-            color = row.get("Колір") or row.get("Цвет") or "-"
-            size = row.get("Розмір") or row.get("Размер") or "-"
-            photo = row.get("Фото") or ""
+    # Пробуем сначала utf-8, если не выйдет - windows-1251
+    encodings = ["utf-8", "windows-1251", "utf-8-sig"]
+    
+    for enc in encodings:
+        try:
+            with open(CSV_FILE, mode="r", encoding=enc) as file:
+                sample = file.readline()
+                if not sample:
+                    continue
+                file.seek(0)
+                
+                delimiter = ";" if ";" in sample else ","
+                reader = csv.DictReader(file, delimiter=delimiter)
+                
+                for row in reader:
+                    # Извлекаем данные с защитой от пустых строк
+                    name = row.get("Назва") or row.get("Наименование") or "Товар Victoria's Secret"
+                    price = row.get("Ціна продажу") or row.get("Рекомендована ціна") or row.get("Цена") or "0"
+                    color = row.get("Колір") or row.get("Цвет") or "-"
+                    size = row.get("Розмір") or row.get("Размер") or "-"
+                    photo = row.get("Фото") or ""
+                    
+                    products.append({
+                        "name": str(name).strip(),
+                        "price": str(price).strip(),
+                        "color": str(color).strip(),
+                        "size": str(size).strip(),
+                        "photo": str(photo).strip()
+                    })
+            # Если успешно прочитали файл — выходим из цикла кодировок
+            break
+        except Exception:
+            # Если упало с одной кодировкой, пробуем следующую
+            continue
             
-            # Очищаем цену от лишних пробелов или знаков
-            price = str(price).strip()
-
-            products.append({
-                "name": name,
-                "price": price,
-                "color": color,
-                "size": size,
-                "photo": photo
-            })
     return products
+
 
 
 @bot.message_handler(commands=['start'])
