@@ -73,38 +73,37 @@ def start(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_buttons(message):
-    if message.text == "🛍️ Каталог":
-        products = get_products()
-        
-        if not products:
-            bot.send_message(message.chat.id, "Каталог товаров временно пуст.")
-            return
+    try:
+        if message.text == "🛍️ Каталог":
+            products = get_products()
             
-        bot.send_message(message.chat.id, f"Найдено доступных товаров: {len(products)}. Загружаю первые позиции...")
-        
-        # Выводим первые 10 товаров, чтобы не перегружать чат за раз
-        for prod in products[:10]:
-            caption = (
-                f"🌸 *{prod['name']}*\n\n"
-                f"🎨 *Цвет:* {prod['color']}\n"
-                f"📏 *Размер:* {prod['size']}\n"
-                f"💰 *Цена:* {prod['price']} грн"
-            )
-            
-            # Если есть ссылка на фото в колонке "Фото", отправляем карточку с картинкой
-            if prod['photo'] and prod['photo'].startswith("http"):
-                try:
-                    bot.send_photo(message.chat.id, prod['photo'], caption=caption, parse_mode="Markdown")
-                except Exception:
-                    bot.send_message(message.chat.id, caption, parse_mode="Markdown")
-            else:
-                bot.send_message(message.chat.id, caption, parse_mode="Markdown")
+            if not products:
+                bot.send_message(message.chat.id, "Каталог товаров временно пуст или файл недоступен.")
+                return
                 
-    elif message.text == "🛒 Корзина":
-        bot.send_message(message.chat.id, "Ваша корзина пока пуста.")
-        
-    elif message.text == "ℹ️ Помощь":
-        bot.send_message(message.chat.id, "По всем вопросам и для оформления заказа пишите менеджеру.")
+            bot.send_message(message.chat.id, f"Найдено доступных товаров: {len(products)}. Загружаю первые позиции...")
+            
+            for prod in products[:10]:
+                caption = (
+                    f"🌸 *{prod['name']}*\n\n"
+                    f"🎨 *Цвет:* {prod['color']}\n"
+                    f"📏 *Размер:* {prod['size']}\n"
+                    f"💰 *Цена:* {prod['price']} грн"
+                )
+                
+                if prod['photo'] and prod['photo'].startswith("http"):
+                    try:
+                        bot.send_photo(message.chat.id, prod['photo'], caption=caption, parse_mode="Markdown")
+                    except Exception:
+                        bot.send_message(message.chat.id, caption, parse_mode="Markdown")
+                else:
+                    bot.send_message(message.chat.id, caption, parse_mode="Markdown")
+                    
+        elif message.text == "🛒 Корзина":
+            bot.send_message(message.chat.id, "Ваша корзина пока пуста.")
+            
+        elif message.text == "ℹ️ Помощь":
+            bot.send_message(message.chat.id, "По всем вопросам и для оформления заказа пишите менеджеру.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка при обработке меню. Проверьте логи.")
 
-if __name__ == '__main__':
-    bot.polling(none_stop=True)
